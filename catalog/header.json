@@ -1,0 +1,64 @@
+{
+  "format": "patent-catalog-aesgcm-v1",
+  "kdf": "PBKDF2-HMAC-SHA256",
+  "iterations": 600000,
+  "salt_b64": "DEgoRYRa7p2SaMubCCVg5w==",
+  "files": [
+    {
+      "name": "meta.json",
+      "file": "meta.json.enc",
+      "nonce_b64": "cK6VFwdXxiojvek/",
+      "bytes": 346
+    },
+    {
+      "name": "records-0000.json",
+      "file": "records-0000.json.enc",
+      "nonce_b64": "uf5jqbA1x9RuYZ8n",
+      "bytes": 38934154
+    },
+    {
+      "name": "records-0001.json",
+      "file": "records-0001.json.enc",
+      "nonce_b64": "aJ/3gzz5TIV8Encg",
+      "bytes": 40589726
+    },
+    {
+      "name": "records-0002.json",
+      "file": "records-0002.json.enc",
+      "nonce_b64": "fx/yEh1ziO/3chVX",
+      "bytes": 9267856
+    },
+    {
+      "name": "shard-0000.bin",
+      "file": "shard-0000.bin.enc",
+      "nonce_b64": "c+lgEVsHsSWyw119",
+      "bytes": 94370832
+    },
+    {
+      "name": "shard-0001.bin",
+      "file": "shard-0001.bin.enc",
+      "nonce_b64": "gmipQiMN/NbD2qi6",
+      "bytes": 94370832
+    },
+    {
+      "name": "shard-0002.bin",
+      "file": "shard-0002.bin.enc",
+      "nonce_b64": "OY++rQ2aPsS2OCU1",
+      "bytes": 21646352
+    },
+    {
+      "name": "thumbs-0000.bin",
+      "file": "thumbs-0000.bin.enc",
+      "nonce_b64": "fGCeYws29hPm2PZf",
+      "bytes": 94371076
+    },
+    {
+      "name": "thumbs-0001.bin",
+      "file": "thumbs-0001.bin.enc",
+      "nonce_b64": "J/oBxkDKOGs9vVvO",
+      "bytes": 82954087
+    }
+  ],
+  "count": 205457,
+  "dim": 512
+}

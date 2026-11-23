@@ -1,271 +1,115 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>专利图像搜索 | Patent Image Search</title>
-<meta name="description" content="通过图片搜索欧盟、英国、美国外观设计专利。免费工具，支持以图搜图。">
-<style>
-  :root {
-    --primary: #1e3a5f;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --success: #059669;
-    --bg: #f8fafc;
-    --card: #ffffff;
-    --text: #1e293b;
-    --muted: #64748b;
-    --border: #e2e8f0;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-  }
-  .hero {
-    background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
-    color: white;
-    padding: 4rem 1.5rem 3rem;
-    text-align: center;
-  }
-  .hero h1 {
-    font-size: 2.6rem;
-    font-weight: 700;
-    margin-bottom: 0.75rem;
-  }
-  .hero .subtitle {
-    font-size: 1.2rem;
-    opacity: 0.95;
-    max-width: 680px;
-    margin: 0 auto;
-  }
-  .container {
-    max-width: 1000px;
-    margin: -2rem auto 3rem;
-    padding: 0 1.5rem;
-  }
-  .card {
-    background: var(--card);
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    padding: 2rem;
-    margin-bottom: 1.5rem;
-  }
-  .upload-box {
-    border: 2.5px dashed #cbd5e1;
-    border-radius: 12px;
-    padding: 3rem 2rem;
-    text-align: center;
-    background: #f8fafc;
-    cursor: pointer;
-    transition: all 0.25s ease;
-  }
-  .upload-box:hover, .upload-box.dragover {
-    border-color: var(--accent);
-    background: #eff6ff;
-  }
-  .upload-box .icon { font-size: 3rem; margin-bottom: 0.5rem; }
-  .preview-img {
-    max-width: 100%;
-    max-height: 260px;
-    border-radius: 10px;
-    margin-top: 1.2rem;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    display: none;
-  }
-  .btn {
-    display: inline-block;
-    background: var(--accent);
-    color: white;
-    padding: 0.85rem 1.8rem;
-    border-radius: 10px;
-    font-size: 1.05rem;
-    font-weight: 600;
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .btn:hover { background: var(--accent-hover); }
-  .btn-success { background: var(--success); }
-  .btn-success:hover { background: #047857; }
-  .btn-large { padding: 1rem 2.2rem; font-size: 1.1rem; }
-  .center { text-align: center; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.25rem;
-  }
-  .tool {
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    background: white;
-  }
-  .tool h3 { color: var(--primary); margin-bottom: 0.5rem; }
-  .badge {
-    display: inline-block;
-    background: #f1f5f9;
-    color: #475569;
-    padding: 0.15rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    margin-right: 0.35rem;
-  }
-  .badge.free { background: #d1fae5; color: #065f46; }
-  .badge.hot { background: #fee2e2; color: #991b1b; }
-  .note {
-    background: #fffbeb;
-    border-left: 4px solid #f59e0b;
-    padding: 1rem 1.25rem;
-    border-radius: 0 8px 8px 0;
-    margin: 1.25rem 0;
-    font-size: 0.95rem;
-  }
-  .steps { padding-left: 1.25rem; }
-  .steps li { margin-bottom: 0.5rem; }
-  footer {
-    text-align: center;
-    color: var(--muted);
-    padding: 2rem 1rem;
-    font-size: 0.9rem;
-  }
-  @media (max-width: 640px) {
-    .hero h1 { font-size: 2rem; }
-    .hero { padding: 3rem 1rem 2.5rem; }
-  }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>以图搜外观专利</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<div class="hero">
-  <h1>专利图像搜索</h1>
-  <p class="subtitle">通过图片精准查找欧盟、英国、美国的外观设计专利<br>免费使用 · 无需注册</p>
+<header><h1>以图搜外观专利</h1></header>
+<main>
+<div class="panel">
+<p class="note">索引、著录和缩略图是加密的。未解锁时页面没有这些内容。加密文件仍可被下载后离线猜密码，正式密码必须长且随机。本页不保存密码。</p>
+<form id="gate">
+<input id="pw" type="password" autocomplete="current-password" placeholder="密码">
+<button type="submit">解锁</button>
+<button type="button" id="lock" disabled>锁定</button>
+</form>
+<p class="note" id="status">尚未解锁。</p>
+<input id="file" type="file" accept="image/*" disabled>
+<div class="grid" id="grid"></div>
 </div>
-
-<div class="container">
-
-  <div class="card">
-    <h2 style="margin-bottom:1rem;">上传图片开始搜索</h2>
-    <div class="upload-box" id="uploadArea">
-      <div class="icon">📷</div>
-      <p style="font-size:1.1rem; font-weight:500;">拖拽图片到此处，或点击选择文件</p>
-      <p style="color:var(--muted); font-size:0.9rem; margin-top:0.4rem;">支持 JPG / PNG / GIF / WebP，建议清晰产品照片或设计图纸</p>
-      <input type="file" id="fileInput" accept="image/*" style="display:none;">
-      <img id="preview" class="preview-img" alt="图片预览">
-    </div>
-
-    <div class="center" style="margin-top:1.5rem;">
-      <button class="btn btn-success btn-large" id="searchBtn">以图搜图 · 外观设计专利</button>
-    </div>
-
-    <div class="note">
-      <strong>推荐工具：</strong>点击上方按钮将打开 <strong>EUIPO DesignView</strong> —— 全球最大的免费工业设计图像搜索引擎。覆盖美国 USPTO 外观专利、欧盟注册设计、英国设计等 76 个知识产权局，超过 2400 万件设计、1.11 亿张图片。
-    </div>
-  </div>
-
-  <div class="card">
-    <h2 style="margin-bottom:1rem;">如何使用 DesignView 以图搜图</h2>
-    <ol class="steps">
-      <li>点击上方按钮打开 DesignView 网站</li>
-      <li>在页面找到 “Search by image” 区域，上传刚才选择的图片</li>
-      <li>在 Territories / Offices 中选择：
-        <strong>United States</strong>、<strong>European Union</strong>、<strong>United Kingdom</strong>
-      </li>
-      <li>点击 Search，系统会返回视觉相似的外观设计专利</li>
-    </ol>
-  </div>
-
-  <h2 style="margin:1.5rem 0 1rem; color:var(--primary);">相关官方数据库</h2>
-  <div class="grid">
-
-    <div class="tool">
-      <h3>外观设计（推荐）</h3>
-      <span class="badge free">免费</span>
-      <span class="badge hot">以图搜图</span>
-      <p style="margin:0.8rem 0;">产品外观、形状、图案、包装设计</p>
-      <a class="btn" href="https://www.tmdn.org/tmdsview-web/" target="_blank" rel="noopener">打开 DesignView</a>
-    </div>
-
-    <div class="tool">
-      <h3>美国专利 USPTO</h3>
-      <span class="badge free">免费</span>
-      <p style="margin:0.8rem 0;">实用专利 + 外观专利官方库</p>
-      <a class="btn" href="https://ppubs.uspto.gov/pubwebapp/" target="_blank" rel="noopener">Patent Public Search</a>
-      <a class="btn" href="https://patents.google.com/" target="_blank" rel="noopener" style="margin-left:0.5rem;">Google Patents</a>
-    </div>
-
-    <div class="tool">
-      <h3>欧盟 Espacenet</h3>
-      <span class="badge free">免费</span>
-      <p style="margin:0.8rem 0;">全球最大专利数据库之一，支持 CPC 分类</p>
-      <a class="btn" href="https://worldwide.espacenet.com/" target="_blank" rel="noopener">打开 Espacenet</a>
-    </div>
-
-    <div class="tool">
-      <h3>英国 UKIPO</h3>
-      <span class="badge free">免费</span>
-      <p style="margin:0.8rem 0;">英国知识产权局官方搜索</p>
-      <a class="btn" href="https://www.search-for-intellectual-property.service.gov.uk/" target="_blank" rel="noopener">打开 UKIPO</a>
-    </div>
-
-  </div>
-
-  <div class="card" style="margin-top:1.5rem;">
-    <h2 style="margin-bottom:0.8rem;">重要说明</h2>
-    <ul class="steps">
-      <li><strong>外观设计专利</strong>：可直接使用上方以图搜图功能，效果较好。</li>
-      <li><strong>实用专利</strong>（技术功能类）：目前美国、欧盟、英国官方免费数据库<strong>不提供</strong>公开的以图搜图接口。建议先根据图片内容提取关键词，再使用 Google Patents 或 Espacenet 搜索。</li>
-      <li>如需更精准的专业级图像检索，可考虑付费工具（如 IPRally、Patsnap 等）。</li>
-      <li>搜索结果仅供参考，正式分析或申请前请咨询专业专利代理人。</li>
-    </ul>
-  </div>
-
-</div>
-
-<footer>
-  本页面为信息导航工具，不存储任何用户上传的图片。<br>
-  数据来源于官方公开数据库 · 可自由分享此页面
-</footer>
-
+</main>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+<script src="catalog_crypto.js"></script>
+<script src="clip_preprocess.js"></script>
+<script src="clip_embed.js"></script>
+<script src="search.js"></script>
+<script src="session.js"></script>
 <script>
-const uploadArea = document.getElementById('uploadArea');
-const fileInput = document.getElementById('fileInput');
-const preview = document.getElementById('preview');
-const searchBtn = document.getElementById('searchBtn');
+let session = null;
+let clip = null;
+const status = document.querySelector("#status");
+const file = document.querySelector("#file");
 
-uploadArea.addEventListener('click', () => fileInput.click());
-
-fileInput.addEventListener('change', e => {
-  if (e.target.files?.[0]) handleFile(e.target.files[0]);
-});
-
-['dragenter','dragover'].forEach(ev => {
-  uploadArea.addEventListener(ev, e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
-});
-['dragleave','drop'].forEach(ev => {
-  uploadArea.addEventListener(ev, e => { e.preventDefault(); uploadArea.classList.remove('dragover'); });
-});
-uploadArea.addEventListener('drop', e => {
-  const file = e.dataTransfer.files?.[0];
-  if (file && file.type.startsWith('image/')) handleFile(file);
-});
-
-function handleFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    preview.src = e.target.result;
-    preview.style.display = 'block';
-  };
-  reader.readAsDataURL(file);
+function wipe() {
+  session = null;
+  document.querySelector("#grid").innerHTML = "";
+  file.disabled = true;
+  document.querySelector("#lock").disabled = true;
 }
 
-searchBtn.addEventListener('click', () => {
-  window.open('https://www.tmdn.org/tmdsview-web/', '_blank', 'noopener');
-});
-</script>
+document.querySelector("#lock").onclick = function () {
+  wipe();
+  status.textContent = "已锁定。内存中的索引和图片已丢掉。";
+};
 
+async function loadClip() {
+  const resp = await fetch("model/manifest.json");
+  if (!resp.ok) return null;
+  const manifest = await resp.json();
+  if (manifest.model !== "ViT-B-32" || manifest.pretrained !== "laion2b_s34b_b79k") {
+    throw new Error("查询模型不是现有索引用的 ViT-B-32 laion2b_s34b_b79k");
+  }
+  const runtime = await ort.InferenceSession.create("model/" + manifest.file, {
+    executionProviders: ["wasm"],
+  });
+  return { runtime: runtime, manifest: manifest };
+}
+
+document.querySelector("#gate").onsubmit = async function (ev) {
+  ev.preventDefault();
+  const password = document.querySelector("#pw").value;
+  document.querySelector("#pw").value = "";
+  status.textContent = "正在解密…";
+  try {
+    const headerResp = await fetch("catalog/header.json");
+    if (!headerResp.ok) throw new Error("没有加密目录");
+    const header = await headerResp.json();
+    const fileMap = {};
+    for (const ent of header.files) {
+      const resp = await fetch("catalog/" + ent.file);
+      if (!resp.ok) throw new Error("缺少 " + ent.file);
+      fileMap[ent.file] = await resp.arrayBuffer();
+    }
+    const parts = await PatentCrypto.decryptAll(password, header, fileMap);
+    session = PatentSession.openParts(parts);
+    document.querySelector("#lock").disabled = false;
+    clip = await loadClip();
+    if (!clip) {
+      file.disabled = true;
+      status.textContent = "密码正确，目录已解密（" + session.meta.count + " 条）。同款 CLIP 查询模型不在这个站点里，所以上传检索没有打开。";
+      return;
+    }
+    file.disabled = false;
+    status.textContent = "已解锁，可以上传图片。模型 " + clip.manifest.pretrained + "。";
+  } catch (err) {
+    wipe();
+    status.textContent = err.message === "密码不正确" ? "密码不正确，索引和图片没有解开。" : ("打不开目录：" + err.message);
+  }
+};
+
+file.onchange = async function () {
+  const picked = file.files && file.files[0];
+  if (!picked || !session || !clip) return;
+  status.textContent = "正在计算向量…";
+  const bitmap = await createImageBitmap(picked);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0);
+  const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  const query = await ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
+  const rows = PatentSession.searchSession(session, query, { region: "ALL", topK: 24 });
+  for (const row of rows) {
+    const bytes = PatentSession.thumbBytes(session, row);
+    if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  }
+  document.querySelector("#grid").innerHTML = PatentSearch.cardsHtml(rows);
+  status.textContent = "找到 " + rows.length + " 条。图片来自解密后的缩略图。";
+};
+</script>
 </body>
 </html>
