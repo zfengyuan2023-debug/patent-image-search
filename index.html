@@ -10,19 +10,15 @@
 <header><h1>以图搜外观专利</h1></header>
 <main>
 <div class="panel">
-<p class="note">索引、著录和缩略图是加密的。未解锁时页面没有这些内容。加密文件仍可被下载后离线猜密码，正式密码必须长且随机。本页不保存密码。</p>
-<form id="gate">
-<input id="pw" type="password" autocomplete="current-password" placeholder="密码">
-<button type="submit">解锁</button>
-<button type="button" id="lock" disabled>锁定</button>
-</form>
-<p class="note" id="status">尚未解锁。</p>
+<p class="note">上传一张产品照片，在欧盟和美国外观设计里找相近的图。首次加载会下载目录和图像模型，大约 800 MB。</p>
+<p class="note" id="status">正在打开目录…</p>
+<div class="bar" aria-hidden="true"><div id="bar"></div></div>
+<label for="file">产品照片</label>
 <input id="file" type="file" accept="image/*" disabled>
 <div class="grid" id="grid"></div>
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
-<script src="catalog_crypto.js"></script>
 <script src="clip_preprocess.js"></script>
 <script src="clip_embed.js"></script>
 <script src="search.js"></script>
@@ -31,26 +27,75 @@
 let session = null;
 let clip = null;
 const status = document.querySelector("#status");
+const bar = document.querySelector("#bar");
 const file = document.querySelector("#file");
 
-function wipe() {
-  session = null;
-  document.querySelector("#grid").innerHTML = "";
-  file.disabled = true;
-  document.querySelector("#lock").disabled = true;
+function setBar(done, total) {
+  const pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
+  bar.style.width = pct + "%";
+  return pct;
 }
 
-document.querySelector("#lock").onclick = function () {
-  wipe();
-  status.textContent = "已锁定。内存中的索引和图片已丢掉。";
-};
+async function fetchBytes(url, onChunk) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("缺少 " + url);
+  if (!resp.body || !resp.body.getReader) {
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    onChunk(buf.length);
+    return buf;
+  }
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let n = 0;
+  while (true) {
+    const step = await reader.read();
+    if (step.done) break;
+    chunks.push(step.value);
+    n += step.value.length;
+    onChunk(step.value.length);
+  }
+  const out = new Uint8Array(n);
+  let off = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, off);
+    off += chunk.length;
+  }
+  return out;
+}
+
+async function loadCatalog() {
+  status.textContent = "正在读取目录说明…";
+  const headerResp = await fetch("catalog/header.json");
+  if (!headerResp.ok) throw new Error("没有目录");
+  const header = await headerResp.json();
+  if (header.format !== "patent-catalog-public-v1") {
+    throw new Error("这个目录不是公开目录");
+  }
+  const expected = header.files.reduce(function (sum, ent) { return sum + (ent.bytes || 0); }, 0);
+  let done = 0;
+  const fileMap = {};
+  for (let i = 0; i < header.files.length; i++) {
+    const ent = header.files[i];
+    status.textContent = "正在下载目录 " + (i + 1) + " / " + header.files.length + " …";
+    fileMap[ent.name] = await fetchBytes("catalog/" + ent.file, function (n) {
+      done += n;
+      const pct = setBar(done, expected);
+      status.textContent = "正在下载目录 " + (i + 1) + " / " + header.files.length +
+        "，" + (done / 1048576).toFixed(0) + " / " + (expected / 1048576).toFixed(0) +
+        " MB（" + pct + "%）。首次加载大约下载 800 MB。";
+    });
+  }
+  return PatentSession.openParts(fileMap);
+}
 
 async function loadClip() {
+  status.textContent = "目录已就绪，正在载入图像模型…";
+  setBar(1, 1);
   const resp = await fetch("model/manifest.json");
-  if (!resp.ok) return null;
+  if (!resp.ok) throw new Error("站点里没有图像模型");
   const manifest = await resp.json();
   if (manifest.model !== "ViT-B-32" || manifest.pretrained !== "laion2b_s34b_b79k") {
-    throw new Error("查询模型不是现有索引用的 ViT-B-32 laion2b_s34b_b79k");
+    throw new Error("查询模型不是索引用的 ViT-B-32 laion2b_s34b_b79k");
   }
   const runtime = await ort.InferenceSession.create("model/" + manifest.file, {
     executionProviders: ["wasm"],
@@ -58,58 +103,46 @@ async function loadClip() {
   return { runtime: runtime, manifest: manifest };
 }
 
-document.querySelector("#gate").onsubmit = async function (ev) {
-  ev.preventDefault();
-  const password = document.querySelector("#pw").value;
-  document.querySelector("#pw").value = "";
-  status.textContent = "正在解密…";
+async function start() {
   try {
-    const headerResp = await fetch("catalog/header.json");
-    if (!headerResp.ok) throw new Error("没有加密目录");
-    const header = await headerResp.json();
-    const fileMap = {};
-    for (const ent of header.files) {
-      const resp = await fetch("catalog/" + ent.file);
-      if (!resp.ok) throw new Error("缺少 " + ent.file);
-      fileMap[ent.file] = await resp.arrayBuffer();
-    }
-    const parts = await PatentCrypto.decryptAll(password, header, fileMap);
-    session = PatentSession.openParts(parts);
-    document.querySelector("#lock").disabled = false;
+    session = await loadCatalog();
     clip = await loadClip();
-    if (!clip) {
-      file.disabled = true;
-      status.textContent = "密码正确，目录已解密（" + session.meta.count + " 条）。同款 CLIP 查询模型不在这个站点里，所以上传检索没有打开。";
-      return;
-    }
     file.disabled = false;
-    status.textContent = "已解锁，可以上传图片。模型 " + clip.manifest.pretrained + "。";
+    status.textContent = "可以上传产品照片。目录里有 " + session.meta.count + " 条欧盟和美国外观。";
   } catch (err) {
-    wipe();
-    status.textContent = err.message === "密码不正确" ? "密码不正确，索引和图片没有解开。" : ("打不开目录：" + err.message);
+    file.disabled = true;
+    status.textContent = "目录没有载入：" + err.message;
   }
-};
+}
 
 file.onchange = async function () {
   const picked = file.files && file.files[0];
   if (!picked || !session || !clip) return;
-  status.textContent = "正在计算向量…";
-  const bitmap = await createImageBitmap(picked);
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bitmap, 0, 0);
-  const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-  const query = await ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
-  const rows = PatentSession.searchSession(session, query, { region: "ALL", topK: 24 });
-  for (const row of rows) {
-    const bytes = PatentSession.thumbBytes(session, row);
-    if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  status.textContent = "正在计算这张照片的向量…";
+  try {
+    const bitmap = await createImageBitmap(picked);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0);
+    const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const query = await ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
+    const rows = PatentSession.searchSession(session, query, { region: "ALL", topK: 24 });
+    for (const row of rows) {
+      const bytes = PatentSession.thumbBytes(session, row);
+      if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    }
+    document.querySelector("#grid").innerHTML = rows.length
+      ? PatentSearch.cardsHtml(rows)
+      : "";
+    status.textContent = rows.length ? ("找到 " + rows.length + " 条。") : "没有足够接近的外观。";
+  } catch (err) {
+    status.textContent = "这张照片没有检索成：" + err.message;
   }
-  document.querySelector("#grid").innerHTML = PatentSearch.cardsHtml(rows);
-  status.textContent = "找到 " + rows.length + " 条。图片来自解密后的缩略图。";
 };
+
+start();
 </script>
 </body>
 </html>

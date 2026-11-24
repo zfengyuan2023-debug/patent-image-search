@@ -1,64 +1,53 @@
 {
-  "format": "patent-catalog-aesgcm-v1",
-  "kdf": "PBKDF2-HMAC-SHA256",
-  "iterations": 600000,
-  "salt_b64": "DEgoRYRa7p2SaMubCCVg5w==",
+  "format": "patent-catalog-public-v1",
   "files": [
     {
       "name": "meta.json",
-      "file": "meta.json.enc",
-      "nonce_b64": "cK6VFwdXxiojvek/",
-      "bytes": 346
+      "file": "meta.json",
+      "bytes": 330
     },
     {
       "name": "records-0000.json",
-      "file": "records-0000.json.enc",
-      "nonce_b64": "uf5jqbA1x9RuYZ8n",
-      "bytes": 38934154
+      "file": "records-0000.json",
+      "bytes": 38934138
     },
     {
       "name": "records-0001.json",
-      "file": "records-0001.json.enc",
-      "nonce_b64": "aJ/3gzz5TIV8Encg",
-      "bytes": 40589726
+      "file": "records-0001.json",
+      "bytes": 40589710
     },
     {
       "name": "records-0002.json",
-      "file": "records-0002.json.enc",
-      "nonce_b64": "fx/yEh1ziO/3chVX",
-      "bytes": 9267856
+      "file": "records-0002.json",
+      "bytes": 9267840
     },
     {
       "name": "shard-0000.bin",
-      "file": "shard-0000.bin.enc",
-      "nonce_b64": "c+lgEVsHsSWyw119",
-      "bytes": 94370832
+      "file": "shard-0000.bin",
+      "bytes": 94370816
     },
     {
       "name": "shard-0001.bin",
-      "file": "shard-0001.bin.enc",
-      "nonce_b64": "gmipQiMN/NbD2qi6",
-      "bytes": 94370832
+      "file": "shard-0001.bin",
+      "bytes": 94370816
     },
     {
       "name": "shard-0002.bin",
-      "file": "shard-0002.bin.enc",
-      "nonce_b64": "OY++rQ2aPsS2OCU1",
-      "bytes": 21646352
+      "file": "shard-0002.bin",
+      "bytes": 21646336
     },
     {
       "name": "thumbs-0000.bin",
-      "file": "thumbs-0000.bin.enc",
-      "nonce_b64": "fGCeYws29hPm2PZf",
-      "bytes": 94371076
+      "file": "thumbs-0000.bin",
+      "bytes": 94371060
     },
     {
       "name": "thumbs-0001.bin",
-      "file": "thumbs-0001.bin.enc",
-      "nonce_b64": "J/oBxkDKOGs9vVvO",
-      "bytes": 82954087
+      "file": "thumbs-0001.bin",
+      "bytes": 82954071
     }
   ],
   "count": 205457,
-  "dim": 512
+  "dim": 512,
+  "dtype": "float16"
 }

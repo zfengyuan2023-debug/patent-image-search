@@ -87,9 +87,10 @@
       const page = r.page_url
         ? '<a href="' + escapeAttr(r.page_url) + '">官方记录</a>'
         : "";
+      const score = typeof r.score === "number" ? r.score.toFixed(3) : "";
       return '<article class="card"><div class="im">' + img + '</div><div class="bd"><div>' +
-        escapeAttr(r.region) + " " + escapeAttr(r.number) + "</div><div>" +
-        escapeAttr(r.title) + "</div>" + page + "</div></article>";
+        escapeAttr(r.region) + " " + escapeAttr(r.number) + "</div><div class=\"score\">相似度 " +
+        escapeAttr(score) + "</div><div>" + escapeAttr(r.title) + "</div>" + page + "</div></article>";
     }).join("");
   }
 

@@ -1,4 +1,4 @@
-/* Turn a decrypted catalog into a search session. Locked means no records. */
+/* Turn a public catalog into a search session. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -38,7 +38,7 @@
   }
 
   function searchSession(session, query, opts) {
-    if (!session) throw new Error("未解锁");
+    if (!session) throw new Error("目录还没有载入");
     opts = opts || {};
     return searchApi.searchInt8({
       data: session.data,
