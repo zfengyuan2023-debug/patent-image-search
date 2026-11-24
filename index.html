@@ -7,17 +7,66 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><h1>以图搜外观专利</h1></header>
-<main>
-<div class="panel">
-<p class="note">上传一张产品照片，在欧盟和美国外观设计里找相近的图。首次加载会下载目录和图像模型，大约 800 MB。</p>
-<p class="note" id="status">正在打开目录…</p>
-<div class="bar" aria-hidden="true"><div id="bar"></div></div>
-<label for="file">产品照片</label>
-<input id="file" type="file" accept="image/*" disabled>
-<div class="grid" id="grid"></div>
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span>
+      <strong>以图搜外观专利</strong>
+      <em>欧盟与美国外观设计</em>
+    </span>
+  </div>
+  <div class="count-label" id="count-label">目录准备中</div>
+</header>
+
+<div id="boot" class="boot">
+  <section class="boot-card">
+    <h2>正在准备检索</h2>
+    <p class="lead">首次加载大约下载 800 MB 的目录和图像模型。完成之前不能检索。</p>
+    <div class="bar" aria-hidden="true"><div id="bar"></div></div>
+    <p class="status" id="status">正在打开目录…</p>
+    <ol class="steps">
+      <li id="step-catalog">目录分片</li>
+      <li id="step-model">图像模型</li>
+    </ol>
+  </section>
 </div>
-</main>
+
+<div id="workspace" class="workspace" hidden>
+  <aside class="side">
+    <h2>查询图片</h2>
+    <div class="query-frame" id="preview">把产品照片放在这里</div>
+    <div class="actions">
+      <button type="button" class="ghost" id="pick" disabled>选择图片</button>
+      <button type="button" class="primary" id="search" disabled>检索外观</button>
+    </div>
+    <input id="file" type="file" accept="image/*" hidden disabled>
+    <div class="filters">
+      <div>
+        <label>受理局</label>
+        <div class="seg" id="region">
+          <button type="button" data-value="ALL" class="is-on">全部</button>
+          <button type="button" data-value="EU">欧盟</button>
+          <button type="button" data-value="US">美国</button>
+        </div>
+      </div>
+      <div>
+        <label for="class">洛迦诺 / 美国分类</label>
+        <select id="class" disabled>
+          <option value="">全部</option>
+        </select>
+      </div>
+    </div>
+  </aside>
+  <section class="results">
+    <div class="result-head">
+      <h2 id="summary">选择图片后检索</h2>
+      <span class="hint">按图像相似度排序</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty">选择一张产品照片，再点击检索外观。</div>
+  </section>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
 <script src="clip_preprocess.js"></script>
 <script src="clip_embed.js"></script>
@@ -26,14 +75,46 @@
 <script>
 let session = null;
 let clip = null;
+let queryVec = null;
+let previewUrl = "";
+const PAGE = 48;
 const status = document.querySelector("#status");
 const bar = document.querySelector("#bar");
 const file = document.querySelector("#file");
+const boot = document.querySelector("#boot");
+const workspace = document.querySelector("#workspace");
+const grid = document.querySelector("#grid");
+const empty = document.querySelector("#empty");
+const summary = document.querySelector("#summary");
+const stepCatalog = document.querySelector("#step-catalog");
+const stepModel = document.querySelector("#step-model");
 
 function setBar(done, total) {
   const pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
   bar.style.width = pct + "%";
   return pct;
+}
+
+function regionValue() {
+  const on = document.querySelector("#region .is-on");
+  return on ? on.getAttribute("data-value") : "ALL";
+}
+
+function fillClasses(records) {
+  const sel = document.querySelector("#class");
+  const seen = new Set();
+  for (let i = 0; i < records.length; i++) {
+    const token = PatentSearch.classToken(records[i].classification);
+    if (token) seen.add(token);
+  }
+  const tokens = Array.from(seen).sort();
+  for (let i = 0; i < tokens.length; i++) {
+    const opt = document.createElement("option");
+    opt.value = tokens[i];
+    opt.textContent = tokens[i];
+    sel.appendChild(opt);
+  }
+  sel.disabled = false;
 }
 
 async function fetchBytes(url, onChunk) {
@@ -64,31 +145,30 @@ async function fetchBytes(url, onChunk) {
 }
 
 async function loadCatalog() {
+  stepCatalog.classList.add("is-on");
   status.textContent = "正在读取目录说明…";
   const headerResp = await fetch("catalog/header.json");
   if (!headerResp.ok) throw new Error("没有目录");
   const header = await headerResp.json();
-  if (header.format !== "patent-catalog-public-v1") {
-    throw new Error("这个目录不是公开目录");
-  }
+  if (header.format !== "patent-catalog-public-v1") throw new Error("这个目录不是公开目录");
   const expected = header.files.reduce(function (sum, ent) { return sum + (ent.bytes || 0); }, 0);
   let done = 0;
   const fileMap = {};
   for (let i = 0; i < header.files.length; i++) {
     const ent = header.files[i];
-    status.textContent = "正在下载目录 " + (i + 1) + " / " + header.files.length + " …";
     fileMap[ent.name] = await fetchBytes("catalog/" + ent.file, function (n) {
       done += n;
       const pct = setBar(done, expected);
       status.textContent = "正在下载目录 " + (i + 1) + " / " + header.files.length +
         "，" + (done / 1048576).toFixed(0) + " / " + (expected / 1048576).toFixed(0) +
-        " MB（" + pct + "%）。首次加载大约下载 800 MB。";
+        " MB（" + pct + "%）";
     });
   }
   return PatentSession.openParts(fileMap);
 }
 
 async function loadClip() {
+  stepModel.classList.add("is-on");
   status.textContent = "目录已就绪，正在载入图像模型…";
   setBar(1, 1);
   const resp = await fetch("model/manifest.json");
@@ -103,46 +183,162 @@ async function loadClip() {
   return { runtime: runtime, manifest: manifest };
 }
 
+function showWorkspace() {
+  boot.hidden = true;
+  workspace.hidden = false;
+  file.disabled = false;
+  document.querySelector("#pick").disabled = false;
+  document.querySelector("#count-label").textContent = "目录 " + session.meta.count.toLocaleString("zh-CN") + " 条";
+}
+
+function showRows(report) {
+  const rows = report.rows;
+  for (const row of rows) {
+    const bytes = PatentSession.thumbBytes(session, row);
+    if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  }
+  grid.innerHTML = PatentSearch.cardsHtml(rows);
+  const shown = rows.length;
+  const total = report.total;
+  if (!shown) {
+    empty.hidden = false;
+    empty.textContent = "这个筛选下没有外观。";
+    summary.textContent = "第 0 条，共 " + total.toLocaleString("zh-CN") + " 条";
+    return;
+  }
+  empty.hidden = true;
+  summary.textContent = "第 1–" + shown.toLocaleString("zh-CN") + " 条，共 " + total.toLocaleString("zh-CN") + " 条";
+  const first = grid.querySelector(".card");
+  if (first) first.classList.add("is-on");
+}
+
+async function embedFile(picked) {
+  const bitmap = await createImageBitmap(picked);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0);
+  const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  return ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
+}
+
+async function runSearch() {
+  const picked = file.files && file.files[0];
+  if (!picked || !session || !clip) return;
+  summary.textContent = "正在计算图像向量…";
+  try {
+    if (!queryVec) queryVec = await embedFile(picked);
+    const report = PatentSession.searchSession(session, queryVec, {
+      region: regionValue(),
+      classification: document.querySelector("#class").value,
+      topK: PAGE,
+      withTotal: true,
+    });
+    showRows(report);
+  } catch (err) {
+    summary.textContent = "这张照片没有检索成";
+    empty.hidden = false;
+    empty.textContent = err.message;
+  }
+}
+
+document.querySelector("#pick").onclick = function () { file.click(); };
+document.querySelector("#region").onclick = function (ev) {
+  const btn = ev.target.closest("button");
+  if (!btn) return;
+  document.querySelectorAll("#region button").forEach(function (el) { el.classList.remove("is-on"); });
+  btn.classList.add("is-on");
+};
+file.onchange = function () {
+  const picked = file.files && file.files[0];
+  queryVec = null;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  if (!picked) return;
+  previewUrl = URL.createObjectURL(picked);
+  document.querySelector("#preview").innerHTML = '<img alt="查询图片" src="' + previewUrl + '">';
+  document.querySelector("#search").disabled = false;
+  summary.textContent = "已选择图片，点击检索外观";
+  grid.innerHTML = "";
+  empty.hidden = false;
+  empty.textContent = "点击检索外观，查看最相近的设计。";
+};
+document.querySelector("#search").onclick = runSearch;
+grid.onclick = function (ev) {
+  const card = ev.target.closest(".card");
+  if (!card) return;
+  grid.querySelectorAll(".card.is-on").forEach(function (el) { el.classList.remove("is-on"); });
+  card.classList.add("is-on");
+};
+
+function sketch(label) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 240;
+  canvas.height = 240;
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, 240, 240);
+  g.strokeStyle = "#243038";
+  g.lineWidth = 2;
+  g.strokeRect(58, 42, 124, 132);
+  g.beginPath();
+  g.moveTo(78, 174);
+  g.lineTo(120, 78);
+  g.lineTo(162, 174);
+  g.stroke();
+  return canvas.toDataURL("image/png");
+}
+
+function showFixture(kind) {
+  boot.hidden = true;
+  workspace.hidden = false;
+  document.querySelector("#pick").disabled = false;
+  document.querySelector("#class").disabled = false;
+  document.querySelector("#count-label").textContent = "目录 8 条";
+  ["26.05", "06.01", "D07"].forEach(function (token) {
+    const opt = document.createElement("option");
+    opt.value = token;
+    opt.textContent = token;
+    document.querySelector("#class").appendChild(opt);
+  });
+  if (kind !== "results") return;
+  const src = sketch("查询");
+  document.querySelector("#preview").innerHTML = '<img alt="查询图片" src="' + src + '">';
+  document.querySelector("#search").disabled = false;
+  const rows = [];
+  for (let i = 0; i < 8; i++) {
+    rows.push({
+      id: "EU-" + (i + 1),
+      region: i % 3 === 0 ? "US" : "EU",
+      number: "D" + (102300 + i),
+      title: "外观设计 " + (i + 1),
+      classification: i % 2 ? "Locarno 26.05" : "D07",
+      score: 0.97 - i * 0.03,
+      image_url: sketch(String(i + 1)),
+      page_url: "https://example.test/record/" + (i + 1),
+    });
+  }
+  grid.innerHTML = PatentSearch.cardsHtml(rows);
+  empty.hidden = true;
+  summary.textContent = "第 1–8 条，共 8 条";
+  const first = grid.querySelector(".card");
+  if (first) first.classList.add("is-on");
+}
+
 async function start() {
   try {
     session = await loadCatalog();
+    fillClasses(session.records);
     clip = await loadClip();
-    file.disabled = false;
-    status.textContent = "可以上传产品照片。目录里有 " + session.meta.count + " 条欧盟和美国外观。";
+    showWorkspace();
   } catch (err) {
-    file.disabled = true;
     status.textContent = "目录没有载入：" + err.message;
   }
 }
 
-file.onchange = async function () {
-  const picked = file.files && file.files[0];
-  if (!picked || !session || !clip) return;
-  status.textContent = "正在计算这张照片的向量…";
-  try {
-    const bitmap = await createImageBitmap(picked);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0);
-    const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const query = await ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
-    const rows = PatentSession.searchSession(session, query, { region: "ALL", topK: 24 });
-    for (const row of rows) {
-      const bytes = PatentSession.thumbBytes(session, row);
-      if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
-    }
-    document.querySelector("#grid").innerHTML = rows.length
-      ? PatentSearch.cardsHtml(rows)
-      : "";
-    status.textContent = rows.length ? ("找到 " + rows.length + " 条。") : "没有足够接近的外观。";
-  } catch (err) {
-    status.textContent = "这张照片没有检索成：" + err.message;
-  }
-};
-
-start();
+const fixture = new URLSearchParams(location.search).get("fixture");
+if (fixture) showFixture(fixture);
+else start();
 </script>
 </body>
 </html>

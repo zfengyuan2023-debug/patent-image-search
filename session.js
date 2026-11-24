@@ -48,7 +48,9 @@
       records: session.records,
       query: query,
       region: opts.region || "ALL",
+      classification: opts.classification || "",
       topK: opts.topK || 24,
+      withTotal: !!opts.withTotal,
     });
   }
 

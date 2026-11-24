@@ -30,6 +30,8 @@
     const records = opts.records;
     const query = opts.query;
     const region = opts.region || "ALL";
+    const classification = opts.classification || "";
+    const withTotal = !!opts.withTotal;
     const topK = opts.topK || 24;
     if (!data || !records || !query) throw new Error("catalog and query are required");
     if (dim < 1) throw new Error("dim must be positive");
@@ -49,11 +51,20 @@
     for (let i = 0; i < n; i++) order[i] = i;
     order.sort(function (a, b) { return scores[b] - scores[a]; });
     const best = new Map();
+    const seen = new Set();
+    let total = 0;
     for (let k = 0; k < order.length; k++) {
       const i = order[k];
       const rec = records[i];
       if (region !== "ALL" && rec.region !== region) continue;
-      if (!rec.id || best.has(rec.id)) continue;
+      if (classification && classToken(rec.classification) !== classification) continue;
+      if (!rec.id || seen.has(rec.id)) continue;
+      seen.add(rec.id);
+      total += 1;
+      if (best.size >= topK) {
+        if (!withTotal) break;
+        continue;
+      }
       best.set(rec.id, {
         id: rec.id,
         region: rec.region,
@@ -68,9 +79,19 @@
         thumb: rec.thumb || null,
         score: scores[i],
       });
-      if (best.size >= topK) break;
     }
-    return Array.from(best.values());
+    const rows = Array.from(best.values());
+    if (withTotal) return { rows: rows, total: total };
+    return rows;
+  }
+
+  function classToken(text) {
+    const s = String(text || "");
+    const locarno = s.match(/(\d{2}\.\d{2})/);
+    if (locarno) return locarno[1];
+    const us = s.match(/\bD\s*(\d{1,2})\b/i);
+    if (us) return "D" + ("0" + us[1]).slice(-2);
+    return "";
   }
 
   function escapeAttr(value) {
@@ -83,16 +104,20 @@
     return results.map(function (r) {
       const img = r.image_url
         ? '<img alt="" src="' + escapeAttr(r.image_url) + '">'
-        : "<span>无公开图片地址</span>";
+        : '<span class="no-img">无图</span>';
       const page = r.page_url
         ? '<a href="' + escapeAttr(r.page_url) + '">官方记录</a>'
         : "";
       const score = typeof r.score === "number" ? r.score.toFixed(3) : "";
-      return '<article class="card"><div class="im">' + img + '</div><div class="bd"><div>' +
-        escapeAttr(r.region) + " " + escapeAttr(r.number) + "</div><div class=\"score\">相似度 " +
-        escapeAttr(score) + "</div><div>" + escapeAttr(r.title) + "</div>" + page + "</div></article>";
+      const token = classToken(r.classification);
+      return '<article class="card" data-id="' + escapeAttr(r.id) + '"><div class="im">' + img +
+        '</div><div class="bd"><div class="meta"><span class="pill">' + escapeAttr(r.region) +
+        "</span><span class=\"num\">" + escapeAttr(r.number) + "</span></div>" +
+        '<div class="score">相似度 ' + escapeAttr(score) + "</div>" +
+        (token ? '<div class="cls">' + escapeAttr(token) + "</div>" : "") +
+        '<div class="title">' + escapeAttr(r.title) + "</div>" + page + "</div></article>";
     }).join("");
   }
 
-  return { searchInt8: searchInt8, cardsHtml: cardsHtml, float16: float16 };
+  return { searchInt8: searchInt8, cardsHtml: cardsHtml, float16: float16, classToken: classToken };
 });
