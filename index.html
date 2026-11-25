@@ -65,6 +65,13 @@
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty">选择一张产品照片，再点击检索外观。</div>
   </section>
+  <aside id="detail" class="detail" hidden aria-label="外观详情">
+    <div class="detail-head">
+      <h2>外观详情</h2>
+      <button type="button" class="ghost" id="detail-close">关闭</button>
+    </div>
+    <div id="detail-body" class="detail-body"></div>
+  </aside>
 </div>
 
 <script src="vendor/ort/ort.wasm.min.js"></script>
@@ -77,6 +84,7 @@ let session = null;
 let clip = null;
 let queryVec = null;
 let previewUrl = "";
+let lastRows = [];
 const PAGE = 48;
 const status = document.querySelector("#status");
 const bar = document.querySelector("#bar");
@@ -88,6 +96,8 @@ const empty = document.querySelector("#empty");
 const summary = document.querySelector("#summary");
 const stepCatalog = document.querySelector("#step-catalog");
 const stepModel = document.querySelector("#step-model");
+const detail = document.querySelector("#detail");
+const detailBody = document.querySelector("#detail-body");
 
 function setBar(done, total) {
   const pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
@@ -226,12 +236,34 @@ function showWorkspace() {
   document.querySelector("#count-label").textContent = "目录 " + session.meta.count.toLocaleString("zh-CN") + " 条";
 }
 
+function closeDetail() {
+  detail.hidden = true;
+  workspace.classList.remove("has-detail");
+}
+
+function rowById(id) {
+  for (let i = 0; i < lastRows.length; i++) {
+    if (String(lastRows[i].id) === String(id)) return lastRows[i];
+  }
+  return null;
+}
+
+function openDetail(row, card) {
+  if (!row) return;
+  grid.querySelectorAll(".card.is-on").forEach(function (el) { el.classList.remove("is-on"); });
+  if (card) card.classList.add("is-on");
+  detailBody.innerHTML = PatentSearch.detailHtml(row);
+  detail.hidden = false;
+  workspace.classList.add("has-detail");
+}
+
 function showRows(report) {
   const rows = report.rows;
   for (const row of rows) {
     const bytes = PatentSession.thumbBytes(session, row);
     if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
   }
+  lastRows = rows;
   grid.innerHTML = PatentSearch.cardsHtml(rows);
   const shown = rows.length;
   const total = report.total;
@@ -239,12 +271,13 @@ function showRows(report) {
     empty.hidden = false;
     empty.textContent = "这个筛选下没有外观。";
     summary.textContent = "第 0 条，共 " + total.toLocaleString("zh-CN") + " 条";
+    closeDetail();
     return;
   }
   empty.hidden = true;
   summary.textContent = "第 1–" + shown.toLocaleString("zh-CN") + " 条，共 " + total.toLocaleString("zh-CN") + " 条";
   const first = grid.querySelector(".card");
-  if (first) first.classList.add("is-on");
+  if (first) openDetail(rows[0], first);
 }
 
 async function embedFile(picked) {
@@ -295,15 +328,28 @@ file.onchange = function () {
   document.querySelector("#search").disabled = false;
   summary.textContent = "已选择图片，点击检索外观";
   grid.innerHTML = "";
+  lastRows = [];
   empty.hidden = false;
   empty.textContent = "点击检索外观，查看最相近的设计。";
+  closeDetail();
 };
 document.querySelector("#search").onclick = runSearch;
+document.querySelector("#detail-close").onclick = closeDetail;
 grid.onclick = function (ev) {
+  const link = ev.target.closest("a[href]");
+  if (link && ev.currentTarget.contains(link) && link.getAttribute("target") !== "_blank") {
+    ev.preventDefault();
+  }
   const card = ev.target.closest(".card");
   if (!card) return;
-  grid.querySelectorAll(".card.is-on").forEach(function (el) { el.classList.remove("is-on"); });
-  card.classList.add("is-on");
+  openDetail(rowById(card.getAttribute("data-id")), card);
+};
+grid.onkeydown = function (ev) {
+  if (ev.key !== "Enter" && ev.key !== " ") return;
+  const card = ev.target.closest(".card");
+  if (!card || ev.target.closest("a")) return;
+  ev.preventDefault();
+  openDetail(rowById(card.getAttribute("data-id")), card);
 };
 
 function sketch(label) {
@@ -347,17 +393,21 @@ function showFixture(kind) {
       region: i % 3 === 0 ? "US" : "EU",
       number: "D" + (102300 + i),
       title: "外观设计 " + (i + 1),
+      holder: i % 2 ? "示例权利人" : "",
+      date: i % 3 ? "2021-06-01" : "",
       classification: i % 2 ? "Locarno 26.05" : "D07",
+      status: i % 2 ? "已注册" : "",
       score: 0.97 - i * 0.03,
       image_url: sketch(String(i + 1)),
       page_url: "https://example.test/record/" + (i + 1),
     });
   }
+  lastRows = rows;
   grid.innerHTML = PatentSearch.cardsHtml(rows);
   empty.hidden = true;
   summary.textContent = "第 1–8 条，共 8 条";
   const first = grid.querySelector(".card");
-  if (first) first.classList.add("is-on");
+  if (first) openDetail(rows[0], first);
 }
 
 async function start() {

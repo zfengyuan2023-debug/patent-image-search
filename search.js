@@ -100,24 +100,62 @@
     });
   }
 
+  function isPresent(value) {
+    return value != null && String(value).trim() !== "";
+  }
+
+  function fieldHtml(label, value) {
+    if (!isPresent(value)) return "";
+    return '<div class="detail-row"><dt>' + escapeAttr(label) + "</dt><dd>" +
+      escapeAttr(value) + "</dd></div>";
+  }
+
   function cardsHtml(results) {
     return results.map(function (r) {
       const img = r.image_url
         ? '<img alt="" src="' + escapeAttr(r.image_url) + '">'
         : '<span class="no-img">无图</span>';
-      const page = r.page_url
-        ? '<a href="' + escapeAttr(r.page_url) + '">官方记录</a>'
-        : "";
       const score = typeof r.score === "number" ? r.score.toFixed(3) : "";
       const token = classToken(r.classification);
-      return '<article class="card" data-id="' + escapeAttr(r.id) + '"><div class="im">' + img +
+      return '<article class="card" data-id="' + escapeAttr(r.id) +
+        '" role="button" tabindex="0"><div class="im">' + img +
         '</div><div class="bd"><div class="meta"><span class="pill">' + escapeAttr(r.region) +
         "</span><span class=\"num\">" + escapeAttr(r.number) + "</span></div>" +
         '<div class="score">相似度 ' + escapeAttr(score) + "</div>" +
         (token ? '<div class="cls">' + escapeAttr(token) + "</div>" : "") +
-        '<div class="title">' + escapeAttr(r.title) + "</div>" + page + "</div></article>";
+        '<div class="title">' + escapeAttr(r.title) + "</div>" +
+        '<div class="more">查看详情</div></div></article>';
     }).join("");
   }
 
-  return { searchInt8: searchInt8, cardsHtml: cardsHtml, float16: float16, classToken: classToken };
+  function detailHtml(row) {
+    if (!row) return "";
+    const img = row.image_url
+      ? '<img alt="" src="' + escapeAttr(row.image_url) + '">'
+      : '<span class="no-img">无图</span>';
+    const score = typeof row.score === "number" ? row.score.toFixed(3) : "";
+    const official = isPresent(row.page_url)
+      ? '<a class="official" href="' + escapeAttr(row.page_url) +
+        '" target="_blank" rel="noopener noreferrer">在官方网站打开</a>'
+      : "";
+    return '<div class="detail-media">' + img + "</div>" +
+      '<dl class="detail-fields">' +
+      fieldHtml("受理局", row.region) +
+      fieldHtml("外观号", row.number) +
+      fieldHtml("标题", row.title) +
+      fieldHtml("权利人", row.holder) +
+      fieldHtml("日期", row.date) +
+      fieldHtml("分类", row.classification) +
+      fieldHtml("法律状态", row.status) +
+      fieldHtml("相似度", score) +
+      "</dl>" + official;
+  }
+
+  return {
+    searchInt8: searchInt8,
+    cardsHtml: cardsHtml,
+    detailHtml: detailHtml,
+    float16: float16,
+    classToken: classToken,
+  };
 });
