@@ -118,8 +118,15 @@ function fillClasses(records) {
 }
 
 async function fetchBytes(url, onChunk) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error("缺少 " + url);
+  let resp = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    resp = await fetch(url);
+    if (resp.ok) break;
+    if (attempt === 2 || (resp.status !== 502 && resp.status !== 503 && resp.status !== 429)) {
+      throw new Error("缺少 " + url);
+    }
+    await new Promise(function (resolve) { setTimeout(resolve, 400 * (attempt + 1)); });
+  }
   if (!resp.body || !resp.body.getReader) {
     const buf = new Uint8Array(await resp.arrayBuffer());
     onChunk(buf.length);
@@ -173,18 +180,40 @@ async function loadClip() {
   }
   if (ort.env && ort.env.wasm) {
     ort.env.wasm.wasmPaths = new URL("vendor/ort/", document.baseURI).href;
+    ort.env.wasm.numThreads = 1;
   }
   stepModel.classList.add("is-on");
   status.textContent = "目录已就绪，正在载入图像模型…";
-  setBar(1, 1);
   const resp = await fetch("model/manifest.json");
   if (!resp.ok) throw new Error("站点里没有图像模型");
   const manifest = await resp.json();
   if (manifest.model !== "ViT-B-32" || manifest.pretrained !== "laion2b_s34b_b79k") {
     throw new Error("查询模型不是索引用的 ViT-B-32 laion2b_s34b_b79k");
   }
-  const runtime = await ort.InferenceSession.create("model/" + manifest.file, {
+  const names = (manifest.files && manifest.files.length) ? manifest.files.slice() : [manifest.file];
+  if (names.indexOf(manifest.file) < 0) names.unshift(manifest.file);
+  let done = 0;
+  const fileMap = {};
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    fileMap[name] = await fetchBytes("model/" + name, function (n) {
+      done += n;
+      setBar(i + 1, names.length);
+      status.textContent = "正在下载图像模型 " + (i + 1) + " / " + names.length +
+        "，" + (done / 1048576).toFixed(0) + " MB";
+    });
+  }
+  const externalData = [];
+  for (let i = 0; i < names.length; i++) {
+    if (names[i] !== manifest.file) {
+      externalData.push({ path: names[i], data: fileMap[names[i]] });
+    }
+  }
+  status.textContent = "正在初始化图像模型…";
+  setBar(1, 1);
+  const runtime = await ort.InferenceSession.create(fileMap[manifest.file], {
     executionProviders: ["wasm"],
+    externalData: externalData,
   });
   return { runtime: runtime, manifest: manifest };
 }

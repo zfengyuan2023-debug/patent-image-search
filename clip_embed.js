@@ -1,10 +1,12 @@
 /* Run the exported OpenCLIP image tower. The graph already L2-normalizes. */
 (function (root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.ClipEmbed = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const pre = typeof require === "function" ? require("./clip_preprocess.js") : root.ClipPreprocess;
+})(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
+  const pre = (typeof module === "object" && module.exports && typeof require === "function")
+    ? require("./clip_preprocess.js")
+    : root.ClipPreprocess;
 
   async function embedRGBA(ort, session, rgba, width, height) {
     const input = pre.preprocessRGBA(rgba, width, height);
