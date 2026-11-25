@@ -67,7 +67,7 @@
   </section>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+<script src="vendor/ort/ort.min.js"></script>
 <script src="clip_preprocess.js"></script>
 <script src="clip_embed.js"></script>
 <script src="search.js"></script>
@@ -168,6 +168,12 @@ async function loadCatalog() {
 }
 
 async function loadClip() {
+  if (typeof ort === "undefined") {
+    throw new Error("图像模型库没有载入，请刷新后重试");
+  }
+  if (ort.env && ort.env.wasm) {
+    ort.env.wasm.wasmPaths = new URL("vendor/ort/", document.baseURI).href;
+  }
   stepModel.classList.add("is-on");
   status.textContent = "目录已就绪，正在载入图像模型…";
   setBar(1, 1);
@@ -332,7 +338,8 @@ async function start() {
     clip = await loadClip();
     showWorkspace();
   } catch (err) {
-    status.textContent = "目录没有载入：" + err.message;
+    const msg = err && err.message ? err.message : String(err);
+    status.textContent = (session ? "图像模型没有载入：" : "目录没有载入：") + msg;
   }
 }
 
