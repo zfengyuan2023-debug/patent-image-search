@@ -1,10 +1,12 @@
 /* Turn a public catalog into a search session. */
 (function (root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.PatentSession = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const searchApi = typeof require === "function" ? require("./search.js") : root.PatentSearch;
+})(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
+  const searchApi = (typeof module === "object" && module.exports && typeof require === "function")
+    ? require("./search.js")
+    : root.PatentSearch;
 
   function concat(parts) {
     let n = 0;
