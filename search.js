@@ -104,21 +104,90 @@
     return value != null && String(value).trim() !== "";
   }
 
+  function isHttpImageUrl(url) {
+    return typeof url === "string" && /^https?:\/\//i.test(url.trim());
+  }
+
+  function preserveOfficialImage(row) {
+    if (!row) return row;
+    if (isHttpImageUrl(row.official_image_url)) return row;
+    if (isHttpImageUrl(row.image_url)) row.official_image_url = row.image_url.trim();
+    return row;
+  }
+
+  function displayImageUrl(row) {
+    if (!row) return "";
+    if (row.thumb_url) return row.thumb_url;
+    return row.image_url || "";
+  }
+
+  function lightboxImageUrl(row) {
+    if (!row) return "";
+    if (isHttpImageUrl(row.official_image_url)) return row.official_image_url;
+    if (isHttpImageUrl(row.image_url)) return row.image_url;
+    if (row.thumb_url) return row.thumb_url;
+    return row.image_url || "";
+  }
+
+  function rowCaption(row) {
+    if (!row) return "";
+    const number = isPresent(row.number) ? String(row.number).trim() : "";
+    const title = isPresent(row.title) ? String(row.title).trim() : "";
+    if (number && title) return number + " · " + title;
+    return number || title;
+  }
+
+  function cropPixels(width, height, crop) {
+    width = width | 0;
+    height = height | 0;
+    if (width < 1) width = 1;
+    if (height < 1) height = 1;
+    if (!crop || !(crop.w > 0) || !(crop.h > 0)) {
+      return { sx: 0, sy: 0, sw: width, sh: height };
+    }
+    let sx = Math.round(Number(crop.x) * width);
+    let sy = Math.round(Number(crop.y) * height);
+    let sw = Math.round(Number(crop.w) * width);
+    let sh = Math.round(Number(crop.h) * height);
+    if (sx < 0) { sw += sx; sx = 0; }
+    if (sy < 0) { sh += sy; sy = 0; }
+    if (sx >= width) sx = width - 1;
+    if (sy >= height) sy = height - 1;
+    if (sx + sw > width) sw = width - sx;
+    if (sy + sh > height) sh = height - sy;
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    return { sx: sx, sy: sy, sw: sw, sh: sh };
+  }
+
+  function cropKey(crop) {
+    if (!crop || !(crop.w > 0) || !(crop.h > 0)) return "";
+    return [crop.x, crop.y, crop.w, crop.h].map(function (v) {
+      return Number(v).toFixed(4);
+    }).join(":");
+  }
+
   function fieldHtml(label, value) {
     if (!isPresent(value)) return "";
     return '<div class="detail-row"><dt>' + escapeAttr(label) + "</dt><dd>" +
       escapeAttr(value) + "</dd></div>";
   }
 
+  function imageHtml(row, extraClass) {
+    const src = displayImageUrl(row);
+    const alt = rowCaption(row);
+    if (!src) return '<span class="no-img">无图</span>';
+    return '<img class="zoomable' + (extraClass ? " " + extraClass : "") +
+      '" alt="' + escapeAttr(alt) + '" title="点击查看大图" src="' +
+      escapeAttr(src) + '">';
+  }
+
   function cardsHtml(results) {
     return results.map(function (r) {
-      const img = r.image_url
-        ? '<img alt="" src="' + escapeAttr(r.image_url) + '">'
-        : '<span class="no-img">无图</span>';
       const score = typeof r.score === "number" ? r.score.toFixed(3) : "";
       const token = classToken(r.classification);
       return '<article class="card" data-id="' + escapeAttr(r.id) +
-        '" role="button" tabindex="0"><div class="im">' + img +
+        '" role="button" tabindex="0"><div class="im">' + imageHtml(r) +
         '</div><div class="bd"><div class="meta"><span class="pill">' + escapeAttr(r.region) +
         "</span><span class=\"num\">" + escapeAttr(r.number) + "</span></div>" +
         '<div class="score">相似度 ' + escapeAttr(score) + "</div>" +
@@ -130,15 +199,12 @@
 
   function detailHtml(row) {
     if (!row) return "";
-    const img = row.image_url
-      ? '<img alt="" src="' + escapeAttr(row.image_url) + '">'
-      : '<span class="no-img">无图</span>';
     const score = typeof row.score === "number" ? row.score.toFixed(3) : "";
     const official = isPresent(row.page_url)
       ? '<a class="official" href="' + escapeAttr(row.page_url) +
         '" target="_blank" rel="noopener noreferrer">在官方网站打开</a>'
       : "";
-    return '<div class="detail-media">' + img + "</div>" +
+    return '<div class="detail-media">' + imageHtml(row) + "</div>" +
       '<dl class="detail-fields">' +
       fieldHtml("受理局", row.region) +
       fieldHtml("外观号", row.number) +
@@ -157,5 +223,12 @@
     detailHtml: detailHtml,
     float16: float16,
     classToken: classToken,
+    isHttpImageUrl: isHttpImageUrl,
+    preserveOfficialImage: preserveOfficialImage,
+    displayImageUrl: displayImageUrl,
+    lightboxImageUrl: lightboxImageUrl,
+    rowCaption: rowCaption,
+    cropPixels: cropPixels,
+    cropKey: cropKey,
   };
 });

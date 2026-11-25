@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>以图搜外观专利</title>
 <link rel="stylesheet" href="style.css">
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(function () {});
+}
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -21,7 +26,7 @@
 <div id="boot" class="boot">
   <section class="boot-card">
     <h2>正在准备检索</h2>
-    <p class="lead">首次加载大约下载 800 MB 的目录和图像模型。完成之前不能检索。</p>
+    <p class="lead" id="boot-lead">首次加载大约下载 800 MB 的目录和图像模型。完成之前不能检索。</p>
     <div class="bar" aria-hidden="true"><div id="bar"></div></div>
     <p class="status" id="status">正在打开目录…</p>
     <ol class="steps">
@@ -34,10 +39,14 @@
 <div id="workspace" class="workspace" hidden>
   <aside class="side">
     <h2>查询图片</h2>
-    <div class="query-frame" id="preview">把产品照片放在这里</div>
+    <div class="query-frame" id="preview">
+      <div class="query-placeholder">把产品照片放在这里</div>
+    </div>
+    <p class="crop-hint" id="crop-hint">选择图片后，可在图上拖动框选产品再检索。点击图片可查看原图。</p>
     <div class="actions">
       <button type="button" class="ghost" id="pick" disabled>选择图片</button>
       <button type="button" class="primary" id="search" disabled>检索外观</button>
+      <button type="button" class="ghost" id="clear-crop" hidden>清除框选</button>
     </div>
     <input id="file" type="file" accept="image/*" hidden disabled>
     <div class="filters">
@@ -60,7 +69,7 @@
   <section class="results">
     <div class="result-head">
       <h2 id="summary">选择图片后检索</h2>
-      <span class="hint">按图像相似度排序</span>
+      <span class="hint" id="sort-hint">按图像相似度排序</span>
     </div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty">选择一张产品照片，再点击检索外观。</div>
@@ -74,16 +83,29 @@
   </aside>
 </div>
 
+<div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="查看大图">
+  <button type="button" class="lightbox-close" id="lightbox-close">关闭</button>
+  <figure class="lightbox-figure">
+    <img id="lightbox-img" alt="">
+    <figcaption id="lightbox-caption"></figcaption>
+  </figure>
+</div>
+
 <script src="vendor/ort/ort.wasm.min.js"></script>
 <script src="clip_preprocess.js"></script>
 <script src="clip_embed.js"></script>
 <script src="search.js"></script>
 <script src="session.js"></script>
+<script src="asset-cache.js"></script>
 <script>
 let session = null;
 let clip = null;
 let queryVec = null;
+let querySig = "";
 let previewUrl = "";
+let cropPreviewUrl = "";
+let queryCrop = null;
+let cropDrag = null;
 let lastRows = [];
 const PAGE = 48;
 const status = document.querySelector("#status");
@@ -98,6 +120,10 @@ const stepCatalog = document.querySelector("#step-catalog");
 const stepModel = document.querySelector("#step-model");
 const detail = document.querySelector("#detail");
 const detailBody = document.querySelector("#detail-body");
+const preview = document.querySelector("#preview");
+const lightbox = document.querySelector("#lightbox");
+const lightboxImg = document.querySelector("#lightbox-img");
+const lightboxCaption = document.querySelector("#lightbox-caption");
 
 function setBar(done, total) {
   const pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
@@ -127,16 +153,39 @@ function fillClasses(records) {
   sel.disabled = false;
 }
 
-async function fetchBytes(url, onChunk) {
-  let resp = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    resp = await fetch(url);
-    if (resp.ok) break;
-    if (attempt === 2 || (resp.status !== 502 && resp.status !== 503 && resp.status !== 429)) {
-      throw new Error("缺少 " + url);
-    }
-    await new Promise(function (resolve) { setTimeout(resolve, 400 * (attempt + 1)); });
+let assetHashes = {};
+let lastFetchSource = "network";
+
+function cacheScope() {
+  return new URL("./", document.baseURI).href;
+}
+
+async function prepareCache() {
+  if (typeof PatentAssetCache === "undefined") return;
+  try {
+    const resp = await fetch("SHA256SUMS", { cache: "no-store" });
+    if (resp.ok) assetHashes = PatentAssetCache.parseSha256Sums(await resp.text());
+  } catch (e) {}
+  const lead = document.querySelector("#boot-lead");
+  let cov = { total: 0, hit: 0, missing: 0 };
+  try {
+    cov = await PatentAssetCache.coverageInCache(assetHashes, cacheScope());
+  } catch (e) {}
+  if (lead && cov.total > 0 && cov.hit >= cov.total) {
+    lead.textContent = "正在从本机读取已保存的目录和图像模型。完成之前不能检索。";
+  } else if (lead && cov.hit > 0) {
+    lead.textContent = "发现更新，正在下载有变化的文件，其余从本机读取。完成之前不能检索。";
   }
+  try { await PatentAssetCache.pruneBodies(assetHashes, cacheScope()); } catch (e) {}
+}
+
+function requestPersist() {
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(function () {});
+  }
+}
+
+async function readBody(resp, onChunk) {
   if (!resp.body || !resp.body.getReader) {
     const buf = new Uint8Array(await resp.arrayBuffer());
     onChunk(buf.length);
@@ -161,10 +210,46 @@ async function fetchBytes(url, onChunk) {
   return out;
 }
 
+async function fetchBytes(url, onChunk) {
+  const rel = (typeof PatentAssetCache !== "undefined")
+    ? PatentAssetCache.relativePath(url, document.baseURI)
+    : url;
+  const hash = assetHashes[rel];
+  if (hash && typeof PatentAssetCache !== "undefined" && PatentAssetCache.isHashAddressed(rel)) {
+    try {
+      const hit = await PatentAssetCache.matchBody(rel, hash, cacheScope());
+      if (hit) {
+        lastFetchSource = "local";
+        return readBody(hit, onChunk);
+      }
+    } catch (e) {}
+  }
+  lastFetchSource = "network";
+  let resp = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    resp = await fetch(url, { cache: "no-store" });
+    if (resp.ok) break;
+    if (attempt === 2 || (resp.status !== 502 && resp.status !== 503 && resp.status !== 429)) {
+      throw new Error("缺少 " + url);
+    }
+    await new Promise(function (resolve) { setTimeout(resolve, 400 * (attempt + 1)); });
+  }
+  if (resp.headers && resp.headers.get("X-Patent-Cache") === "local") lastFetchSource = "local";
+  const buf = await readBody(resp, onChunk);
+  if (hash && typeof PatentAssetCache !== "undefined" && PatentAssetCache.isHashAddressed(rel)) {
+    try { await PatentAssetCache.putBody(rel, hash, buf, cacheScope()); } catch (e) {}
+  }
+  return buf;
+}
+
+function progressVerb() {
+  return lastFetchSource === "local" ? "正在从本机读取" : "正在下载";
+}
+
 async function loadCatalog() {
   stepCatalog.classList.add("is-on");
   status.textContent = "正在读取目录说明…";
-  const headerResp = await fetch("catalog/header.json");
+  const headerResp = await fetch("catalog/header.json", { cache: "no-store" });
   if (!headerResp.ok) throw new Error("没有目录");
   const header = await headerResp.json();
   if (header.format !== "patent-catalog-public-v1") throw new Error("这个目录不是公开目录");
@@ -176,7 +261,7 @@ async function loadCatalog() {
     fileMap[ent.name] = await fetchBytes("catalog/" + ent.file, function (n) {
       done += n;
       const pct = setBar(done, expected);
-      status.textContent = "正在下载目录 " + (i + 1) + " / " + header.files.length +
+      status.textContent = progressVerb() + "目录 " + (i + 1) + " / " + header.files.length +
         "，" + (done / 1048576).toFixed(0) + " / " + (expected / 1048576).toFixed(0) +
         " MB（" + pct + "%）";
     });
@@ -194,7 +279,7 @@ async function loadClip() {
   }
   stepModel.classList.add("is-on");
   status.textContent = "目录已就绪，正在载入图像模型…";
-  const resp = await fetch("model/manifest.json");
+  const resp = await fetch("model/manifest.json", { cache: "no-store" });
   if (!resp.ok) throw new Error("站点里没有图像模型");
   const manifest = await resp.json();
   if (manifest.model !== "ViT-B-32" || manifest.pretrained !== "laion2b_s34b_b79k") {
@@ -209,7 +294,7 @@ async function loadClip() {
     fileMap[name] = await fetchBytes("model/" + name, function (n) {
       done += n;
       setBar(i + 1, names.length);
-      status.textContent = "正在下载图像模型 " + (i + 1) + " / " + names.length +
+      status.textContent = progressVerb() + "图像模型 " + (i + 1) + " / " + names.length +
         "，" + (done / 1048576).toFixed(0) + " MB";
     });
   }
@@ -248,25 +333,113 @@ function rowById(id) {
   return null;
 }
 
+function openLightbox(src, caption, alt, fallback) {
+  if (!src) return;
+  lightboxImg.onerror = function () {
+    if (fallback && lightboxImg.getAttribute("src") !== fallback) {
+      lightboxImg.src = fallback;
+    }
+  };
+  lightboxImg.alt = alt || caption || "查看大图";
+  lightboxImg.src = src;
+  lightboxCaption.textContent = caption || "";
+  lightbox.hidden = false;
+  document.body.classList.add("lightbox-open");
+  const closeBtn = document.querySelector("#lightbox-close");
+  if (closeBtn && closeBtn.focus) closeBtn.focus();
+}
+
+function closeLightbox() {
+  if (lightbox.hidden) return;
+  lightbox.hidden = true;
+  lightboxImg.onerror = null;
+  lightboxImg.removeAttribute("src");
+  lightboxCaption.textContent = "";
+  document.body.classList.remove("lightbox-open");
+}
+
+function openQueryLightbox() {
+  if (!previewUrl) return;
+  openLightbox(previewUrl, "查询图片", "查询图片");
+}
+
+function openRowLightbox(row) {
+  if (!row) return;
+  const src = PatentSearch.lightboxImageUrl(row);
+  const fallback = PatentSearch.displayImageUrl(row);
+  openLightbox(src, PatentSearch.rowCaption(row), PatentSearch.rowCaption(row), fallback !== src ? fallback : "");
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
+function queryCompareSrc() {
+  return cropPreviewUrl || previewUrl;
+}
+
+function fillCompare(row) {
+  const media = detailBody.querySelector(".detail-media");
+  if (!media || !row) return;
+  const resultSrc = PatentSearch.displayImageUrl(row);
+  const qsrc = queryCompareSrc();
+  if (!qsrc || !resultSrc) return;
+  media.classList.add("is-compare");
+  const cap = PatentSearch.rowCaption(row) || "结果";
+  media.innerHTML =
+    '<div class="compare-col" data-kind="query">' +
+    '<div class="compare-label">查询</div>' +
+    '<img class="zoomable" alt="查询图片" title="点击查看大图" src="' + escapeHtml(qsrc) + '">' +
+    "</div>" +
+    '<div class="compare-col" data-kind="result">' +
+    '<div class="compare-label">结果</div>' +
+    '<img class="zoomable" alt="' + escapeHtml(cap) +
+    '" title="点击查看大图" src="' + escapeHtml(resultSrc) + '">' +
+    "</div>";
+}
+
 function openDetail(row, card) {
   if (!row) return;
   grid.querySelectorAll(".card.is-on").forEach(function (el) { el.classList.remove("is-on"); });
   if (card) card.classList.add("is-on");
   detailBody.innerHTML = PatentSearch.detailHtml(row);
+  fillCompare(row);
   detail.hidden = false;
   workspace.classList.add("has-detail");
 }
 
+function revokeThumbUrls(rows) {
+  for (let i = 0; i < (rows || []).length; i++) {
+    const row = rows[i];
+    if (row && row.thumb_url && String(row.thumb_url).indexOf("blob:") === 0) {
+      URL.revokeObjectURL(row.thumb_url);
+      row.thumb_url = "";
+    }
+  }
+}
+
 function showRows(report) {
   const rows = report.rows;
+  revokeThumbUrls(lastRows);
   for (const row of rows) {
-    const bytes = PatentSession.thumbBytes(session, row);
-    if (bytes && bytes.length) row.image_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    PatentSearch.preserveOfficialImage(row);
+    if (session) {
+      const bytes = PatentSession.thumbBytes(session, row);
+      if (bytes && bytes.length) {
+        row.thumb_url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+      }
+    }
   }
   lastRows = rows;
   grid.innerHTML = PatentSearch.cardsHtml(rows);
   const shown = rows.length;
   const total = report.total;
+  const hint = document.querySelector("#sort-hint");
+  if (hint) {
+    hint.textContent = queryCrop ? "按框选区域的图像相似度排序" : "按图像相似度排序";
+  }
   if (!shown) {
     empty.hidden = false;
     empty.textContent = "这个筛选下没有外观。";
@@ -280,15 +453,21 @@ function showRows(report) {
   if (first) openDetail(rows[0], first);
 }
 
+function currentQuerySig(picked) {
+  if (!picked) return "";
+  return [picked.name || "", picked.size || 0, picked.lastModified || 0, PatentSearch.cropKey(queryCrop)].join("|");
+}
+
 async function embedFile(picked) {
   const bitmap = await createImageBitmap(picked);
+  const region = PatentSearch.cropPixels(bitmap.width, bitmap.height, queryCrop);
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = region.sw;
+  canvas.height = region.sh;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bitmap, 0, 0);
-  const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-  return ClipEmbed.embedRGBA(ort, clip.runtime, rgba, bitmap.width, bitmap.height);
+  ctx.drawImage(bitmap, region.sx, region.sy, region.sw, region.sh, 0, 0, region.sw, region.sh);
+  const rgba = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  return ClipEmbed.embedRGBA(ort, clip.runtime, rgba, canvas.width, canvas.height);
 }
 
 async function runSearch() {
@@ -296,7 +475,11 @@ async function runSearch() {
   if (!picked || !session || !clip) return;
   summary.textContent = "正在计算图像向量…";
   try {
-    if (!queryVec) queryVec = await embedFile(picked);
+    const sig = currentQuerySig(picked);
+    if (!queryVec || querySig !== sig) {
+      queryVec = await embedFile(picked);
+      querySig = sig;
+    }
     const report = PatentSession.searchSession(session, queryVec, {
       region: regionValue(),
       classification: document.querySelector("#class").value,
@@ -311,7 +494,263 @@ async function runSearch() {
   }
 }
 
+function invalidateQuery() {
+  queryVec = null;
+  querySig = "";
+}
+
+function updateCropHint() {
+  const hint = document.querySelector("#crop-hint");
+  if (!hint) return;
+  if (!previewUrl) {
+    hint.textContent = "选择图片后，可在图上拖动框选产品再检索。点击图片可查看原图。";
+  } else if (queryCrop) {
+    hint.textContent = "已框选区域，将只检索框内内容。点击图片可查看原图。";
+  } else {
+    hint.textContent = "在图上拖动框选产品，再点检索。点击图片可查看原图。";
+  }
+}
+
+function revokeCropPreview() {
+  if (cropPreviewUrl && cropPreviewUrl !== previewUrl && String(cropPreviewUrl).indexOf("blob:") === 0) {
+    URL.revokeObjectURL(cropPreviewUrl);
+  }
+  cropPreviewUrl = "";
+}
+
+async function updateCropPreview() {
+  revokeCropPreview();
+  if (!queryCrop) {
+    cropPreviewUrl = previewUrl;
+    if (!detail.hidden && lastRows.length) {
+      const on = grid.querySelector(".card.is-on");
+      const row = on ? rowById(on.getAttribute("data-id")) : lastRows[0];
+      if (row) fillCompare(row);
+    }
+    return;
+  }
+  const picked = file.files && file.files[0];
+  if (!picked) {
+    cropPreviewUrl = previewUrl;
+    return;
+  }
+  try {
+    const bitmap = await createImageBitmap(picked);
+    const region = PatentSearch.cropPixels(bitmap.width, bitmap.height, queryCrop);
+    const canvas = document.createElement("canvas");
+    canvas.width = region.sw;
+    canvas.height = region.sh;
+    canvas.getContext("2d").drawImage(
+      bitmap, region.sx, region.sy, region.sw, region.sh, 0, 0, region.sw, region.sh);
+    cropPreviewUrl = await new Promise(function (resolve) {
+      canvas.toBlob(function (blob) {
+        resolve(blob ? URL.createObjectURL(blob) : previewUrl);
+      }, "image/jpeg", 0.92);
+    });
+  } catch (e) {
+    cropPreviewUrl = previewUrl;
+  }
+  if (!detail.hidden && lastRows.length) {
+    const on = grid.querySelector(".card.is-on");
+    const row = on ? rowById(on.getAttribute("data-id")) : lastRows[0];
+    if (row) fillCompare(row);
+  }
+}
+
+function renderCropBox() {
+  const layer = document.querySelector("#crop-layer");
+  const clearBtn = document.querySelector("#clear-crop");
+  if (clearBtn) clearBtn.hidden = !queryCrop;
+  if (!layer) return;
+  let box = layer.querySelector(".crop-box");
+  if (!queryCrop) {
+    if (box) box.remove();
+    return;
+  }
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "crop-box";
+    ["nw", "ne", "sw", "se"].forEach(function (name) {
+      const handle = document.createElement("span");
+      handle.className = "crop-handle " + name;
+      handle.setAttribute("data-handle", name);
+      box.appendChild(handle);
+    });
+    layer.appendChild(box);
+  }
+  box.style.left = (queryCrop.x * 100) + "%";
+  box.style.top = (queryCrop.y * 100) + "%";
+  box.style.width = (queryCrop.w * 100) + "%";
+  box.style.height = (queryCrop.h * 100) + "%";
+}
+
+function layoutCropLayer() {
+  const stage = document.querySelector("#query-stage");
+  const img = document.querySelector("#query-img");
+  const layer = document.querySelector("#crop-layer");
+  if (!stage || !img || !layer || !img.naturalWidth) return;
+  const sr = stage.getBoundingClientRect();
+  const ir = img.getBoundingClientRect();
+  layer.style.left = (ir.left - sr.left) + "px";
+  layer.style.top = (ir.top - sr.top) + "px";
+  layer.style.width = ir.width + "px";
+  layer.style.height = ir.height + "px";
+  renderCropBox();
+}
+
+function setQueryPreview(url) {
+  preview.classList.add("has-image");
+  preview.innerHTML = "";
+  const stage = document.createElement("div");
+  stage.className = "query-stage";
+  stage.id = "query-stage";
+  const img = document.createElement("img");
+  img.id = "query-img";
+  img.alt = "查询图片";
+  img.title = "点击查看大图";
+  img.src = url;
+  const layer = document.createElement("div");
+  layer.className = "crop-layer";
+  layer.id = "crop-layer";
+  layer.setAttribute("aria-label", "框选检索区域");
+  stage.appendChild(img);
+  stage.appendChild(layer);
+  preview.appendChild(stage);
+  img.addEventListener("load", layoutCropLayer);
+  if (img.complete) layoutCropLayer();
+  updateCropHint();
+  renderCropBox();
+}
+
+function clearQueryPreview() {
+  preview.classList.remove("has-image");
+  preview.innerHTML = '<div class="query-placeholder">把产品照片放在这里</div>';
+  updateCropHint();
+  const clearBtn = document.querySelector("#clear-crop");
+  if (clearBtn) clearBtn.hidden = true;
+}
+
+function layerNorm(ev, layer) {
+  const r = layer.getBoundingClientRect();
+  const w = r.width || 1;
+  const h = r.height || 1;
+  return {
+    x: Math.min(1, Math.max(0, (ev.clientX - r.left) / w)),
+    y: Math.min(1, Math.max(0, (ev.clientY - r.top) / h)),
+  };
+}
+
+function clampCrop(c) {
+  let x = Number(c.x), y = Number(c.y), w = Number(c.w), h = Number(c.h);
+  if (w < 0) { x += w; w = -w; }
+  if (h < 0) { y += h; h = -h; }
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x + w > 1) w = 1 - x;
+  if (y + h > 1) h = 1 - y;
+  const min = 0.02;
+  if (w < min) w = min;
+  if (h < min) h = min;
+  if (x + w > 1) x = Math.max(0, 1 - w);
+  if (y + h > 1) y = Math.max(0, 1 - h);
+  return { x: x, y: y, w: w, h: h };
+}
+
+function resizeCrop(orig, handle, p) {
+  let x1 = orig.x, y1 = orig.y, x2 = orig.x + orig.w, y2 = orig.y + orig.h;
+  if (handle.indexOf("n") >= 0) y1 = p.y;
+  if (handle.indexOf("s") >= 0) y2 = p.y;
+  if (handle.indexOf("w") >= 0) x1 = p.x;
+  if (handle.indexOf("e") >= 0) x2 = p.x;
+  return clampCrop({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+}
+
+function setCrop(next, invalidate) {
+  queryCrop = next;
+  if (invalidate) invalidateQuery();
+  renderCropBox();
+  updateCropHint();
+  if (invalidate) updateCropPreview();
+}
+
+function clearCrop() {
+  if (!queryCrop && !cropDrag) return;
+  setCrop(null, true);
+}
+
+preview.addEventListener("pointerdown", function (ev) {
+  const cropLayer = document.querySelector("#crop-layer");
+  if (!cropLayer || !previewUrl) return;
+  if (!ev.target.closest("#crop-layer, .crop-box, .crop-handle, #query-img")) return;
+  ev.preventDefault();
+  try { cropLayer.setPointerCapture(ev.pointerId); } catch (e) {}
+  const p = layerNorm(ev, cropLayer);
+  const handle = ev.target.closest(".crop-handle");
+  const onBox = ev.target.closest(".crop-box") && !handle;
+  if (handle && queryCrop) {
+    cropDrag = { mode: "resize", handle: handle.getAttribute("data-handle"), start: p, orig: Object.assign({}, queryCrop), moved: false, x0: ev.clientX, y0: ev.clientY };
+  } else if (onBox && queryCrop) {
+    cropDrag = { mode: "move", start: p, orig: Object.assign({}, queryCrop), moved: false, x0: ev.clientX, y0: ev.clientY };
+  } else {
+    cropDrag = { mode: "draw", start: p, orig: queryCrop ? Object.assign({}, queryCrop) : null, moved: false, x0: ev.clientX, y0: ev.clientY };
+  }
+});
+
+preview.addEventListener("pointermove", function (ev) {
+  if (!cropDrag) return;
+  const cropLayer = document.querySelector("#crop-layer");
+  if (!cropLayer) return;
+  const p = layerNorm(ev, cropLayer);
+  if (Math.hypot(ev.clientX - cropDrag.x0, ev.clientY - cropDrag.y0) > 4) cropDrag.moved = true;
+  if (!cropDrag.moved) return;
+  if (cropDrag.mode === "draw") {
+    setCrop(clampCrop({
+      x: cropDrag.start.x,
+      y: cropDrag.start.y,
+      w: p.x - cropDrag.start.x,
+      h: p.y - cropDrag.start.y,
+    }), false);
+  } else if (cropDrag.mode === "move") {
+    const dx = p.x - cropDrag.start.x;
+    const dy = p.y - cropDrag.start.y;
+    const x = Math.min(Math.max(0, cropDrag.orig.x + dx), 1 - cropDrag.orig.w);
+    const y = Math.min(Math.max(0, cropDrag.orig.y + dy), 1 - cropDrag.orig.h);
+    setCrop({ x: x, y: y, w: cropDrag.orig.w, h: cropDrag.orig.h }, false);
+  } else if (cropDrag.mode === "resize") {
+    setCrop(resizeCrop(cropDrag.orig, cropDrag.handle, p), false);
+  }
+});
+
+function endCropDrag(ev) {
+  if (!cropDrag) return;
+  const was = cropDrag;
+  cropDrag = null;
+  if (!was.moved) {
+    if (was.orig) setCrop(was.orig, false);
+    else setCrop(null, false);
+    renderCropBox();
+    openQueryLightbox();
+    return;
+  }
+  if (was.mode === "draw") {
+    const rawW = queryCrop ? queryCrop.w : 0;
+    const rawH = queryCrop ? queryCrop.h : 0;
+    if (rawW < 0.03 || rawH < 0.03) {
+      setCrop(was.orig, false);
+      renderCropBox();
+      openQueryLightbox();
+      return;
+    }
+  }
+  if (queryCrop) setCrop(clampCrop(queryCrop), true);
+}
+
+preview.addEventListener("pointerup", endCropDrag);
+preview.addEventListener("pointercancel", endCropDrag);
+window.addEventListener("resize", layoutCropLayer);
+
 document.querySelector("#pick").onclick = function () { file.click(); };
+document.querySelector("#clear-crop").onclick = function () { clearCrop(); };
 document.querySelector("#region").onclick = function (ev) {
   const btn = ev.target.closest("button");
   if (!btn) return;
@@ -320,14 +759,23 @@ document.querySelector("#region").onclick = function (ev) {
 };
 file.onchange = function () {
   const picked = file.files && file.files[0];
-  queryVec = null;
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  if (!picked) return;
+  invalidateQuery();
+  queryCrop = null;
+  closeLightbox();
+  if (previewUrl && String(previewUrl).indexOf("blob:") === 0) URL.revokeObjectURL(previewUrl);
+  previewUrl = "";
+  revokeCropPreview();
+  if (!picked) {
+    clearQueryPreview();
+    document.querySelector("#search").disabled = true;
+    return;
+  }
   previewUrl = URL.createObjectURL(picked);
-  document.querySelector("#preview").innerHTML = '<img alt="查询图片" src="' + previewUrl + '">';
+  setQueryPreview(previewUrl);
   document.querySelector("#search").disabled = false;
-  summary.textContent = "已选择图片，点击检索外观";
+  summary.textContent = "已选择图片，可框选产品后点击检索外观";
   grid.innerHTML = "";
+  revokeThumbUrls(lastRows);
   lastRows = [];
   empty.hidden = false;
   empty.textContent = "点击检索外观，查看最相近的设计。";
@@ -335,6 +783,19 @@ file.onchange = function () {
 };
 document.querySelector("#search").onclick = runSearch;
 document.querySelector("#detail-close").onclick = closeDetail;
+document.querySelector("#lightbox-close").onclick = function (ev) {
+  ev.stopPropagation();
+  closeLightbox();
+};
+lightbox.onclick = function (ev) {
+  if (ev.target === lightbox) closeLightbox();
+};
+document.addEventListener("keydown", function (ev) {
+  if (ev.key === "Escape" && !lightbox.hidden) {
+    ev.preventDefault();
+    closeLightbox();
+  }
+});
 grid.onclick = function (ev) {
   const link = ev.target.closest("a[href]");
   if (link && ev.currentTarget.contains(link) && link.getAttribute("target") !== "_blank") {
@@ -342,7 +803,10 @@ grid.onclick = function (ev) {
   }
   const card = ev.target.closest(".card");
   if (!card) return;
-  openDetail(rowById(card.getAttribute("data-id")), card);
+  const row = rowById(card.getAttribute("data-id"));
+  const onImage = ev.target.closest(".im");
+  openDetail(row, card);
+  if (onImage) openRowLightbox(row);
 };
 grid.onkeydown = function (ev) {
   if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -350,6 +814,19 @@ grid.onkeydown = function (ev) {
   if (!card || ev.target.closest("a")) return;
   ev.preventDefault();
   openDetail(rowById(card.getAttribute("data-id")), card);
+};
+detailBody.onclick = function (ev) {
+  if (ev.target.closest("a[href]")) return;
+  const col = ev.target.closest(".compare-col");
+  if (col && col.getAttribute("data-kind") === "query") {
+    openQueryLightbox();
+    return;
+  }
+  if (ev.target.closest(".zoomable, .detail-media img, .compare-col")) {
+    const on = grid.querySelector(".card.is-on");
+    const row = on ? rowById(on.getAttribute("data-id")) : lastRows[0];
+    openRowLightbox(row);
+  }
 };
 
 function sketch(label) {
@@ -384,7 +861,8 @@ function showFixture(kind) {
   });
   if (kind !== "results") return;
   const src = sketch("查询");
-  document.querySelector("#preview").innerHTML = '<img alt="查询图片" src="' + src + '">';
+  previewUrl = src;
+  setQueryPreview(src);
   document.querySelector("#search").disabled = false;
   const rows = [];
   for (let i = 0; i < 8; i++) {
@@ -412,9 +890,11 @@ function showFixture(kind) {
 
 async function start() {
   try {
+    await prepareCache();
     session = await loadCatalog();
     fillClasses(session.records);
     clip = await loadClip();
+    requestPersist();
     showWorkspace();
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
