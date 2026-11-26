@@ -9,17 +9,17 @@
     {
       "name": "records-0000.json",
       "file": "records-0000.json",
-      "bytes": 38934138
+      "bytes": 36769030
     },
     {
       "name": "records-0001.json",
       "file": "records-0001.json",
-      "bytes": 40589710
+      "bytes": 36430813
     },
     {
       "name": "records-0002.json",
       "file": "records-0002.json",
-      "bytes": 10170776
+      "bytes": 9200555
     },
     {
       "name": "shard-0000.bin",
@@ -34,7 +34,7 @@
     {
       "name": "shard-0002.bin",
       "file": "shard-0002.bin",
-      "bytes": 23983104
+      "bytes": 24062976
     },
     {
       "name": "thumbs-0000.bin",
@@ -44,10 +44,10 @@
     {
       "name": "thumbs-0001.bin",
       "file": "thumbs-0001.bin",
-      "bytes": 84651726
+      "bytes": 84724612
     }
   ],
-  "count": 207739,
+  "count": 207817,
   "dim": 512,
   "dtype": "float16"
 }
